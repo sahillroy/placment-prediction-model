@@ -16,9 +16,6 @@ import {
     fetchGithubStats,
     fetchCodeforcesStats,
     fetchCodeChefStats,
-    type LeetCodeStats,
-    type GithubStats,
-    type CodeforcesStats,
     type CodeChefStats,
 } from '@/lib/api-fetchers'
 
@@ -45,8 +42,8 @@ function PlatformCards({ cards }: { cards: PlatformCard[] }) {
                 <div
                     key={card.name}
                     className={`rounded-xl border p-4 ${card.status === 'failed' ? 'bg-red-50 border-red-200' :
-                            card.status === 'skipped' ? 'bg-slate-50 border-slate-200 opacity-60' :
-                                card.color
+                        card.status === 'skipped' ? 'bg-slate-50 border-slate-200 opacity-60' :
+                            card.color
                         }`}
                 >
                     <div className="flex items-center justify-between mb-3">

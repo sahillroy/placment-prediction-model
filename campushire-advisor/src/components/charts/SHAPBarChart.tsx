@@ -45,7 +45,7 @@ export function SHAPBarChart({ contributions }: SHAPBarChartProps) {
                     axisLine={false}
                 />
                 <Tooltip
-                    formatter={(val: number) => [`${val > 0 ? '+' : ''}${val}%`, 'Impact']}
+                    formatter={(val: any) => [`${val > 0 ? '+' : ''}${val}%`, 'Impact']}
                     contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0', fontSize: 12 }}
                 />
                 <Bar dataKey="contribution" radius={[0, 4, 4, 0]}>

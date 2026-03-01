@@ -16,7 +16,7 @@ export const profileSchema = z.object({
     codeforcesHandle: z.string().min(1, 'Codeforces handle is required for accurate prediction'),
 
     // Optional (free API unreliable — we try but don't block)
-    codechefUsername: z.string().optional().default(''),
+    codechefUsername: z.string(),
 })
 
 export type ProfileFormValues = z.infer<typeof profileSchema>

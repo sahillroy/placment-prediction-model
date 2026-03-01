@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { PageLayout } from '@/components/layout/PageLayout'
 import { FormInput } from '@/components/ui/FormInput'
 import { Button } from '@/components/ui/Button'
@@ -37,8 +37,7 @@ function ScoreBlock({ label, value, highlighted }: { label: string; value: numbe
 }
 
 const MATRIX_KEYS: { key: keyof MatrixBreakdown; label: string }[] = [
-    { key: 'coding_platform', label: 'Coding Platforms' },
-    { key: 'github', label: 'GitHub Activity' },
+    { key: 'coding', label: 'Coding Platforms' },
     { key: 'projects', label: 'Projects' },
     { key: 'certifications', label: 'Certifications' },
     { key: 'hackathons', label: 'Hackathons' },
@@ -46,7 +45,6 @@ const MATRIX_KEYS: { key: keyof MatrixBreakdown; label: string }[] = [
 
 export default function WhatIf() {
     const { id } = useParams<{ id: string }>()
-    const navigate = useNavigate()
     const { data: original } = useAnalysisResult(id ?? '')
     const whatIfMutation = useWhatIfAnalysis()
     const [newResult, setNewResult] = useState<AnalysisResult | null>(null)
@@ -183,18 +181,18 @@ export default function WhatIf() {
                             {MATRIX_KEYS.map(({ key, label }) => {
                                 const curr = newResult ? newResult.matrixBreakdown[key] : original.matrixBreakdown[key]
                                 const orig = original.matrixBreakdown[key]
-                                const changed = newResult && curr.earned !== orig.earned
+                                const changed = newResult && curr.score !== orig.score
                                 return (
                                     <div key={key} className={`${changed ? 'bg-emerald-50 rounded-lg p-2 -mx-2' : ''}`}>
                                         <div className="flex items-center gap-2 mb-1">
                                             <span className="text-xs text-slate-600 w-36">{label}</span>
                                             {changed && (
                                                 <span className="text-xs text-emerald-600 font-medium">
-                                                    {orig.earned} → {curr.earned} ✅
+                                                    {orig.score} → {curr.score} ✅
                                                 </span>
                                             )}
                                         </div>
-                                        <CategoryRow label="" earned={curr.earned} max={curr.max} />
+                                        <CategoryRow label="" earned={curr.score} max={curr.maxScore} />
                                     </div>
                                 )
                             })}
