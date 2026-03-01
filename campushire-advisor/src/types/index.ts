@@ -34,6 +34,8 @@ export interface CodingActivity {
     githubRepos: number
     githubFollowers: number
     githubStars: number
+    githubYearlyContributions: number   // all activity in past 365 days (commits+PRs+reviews)
+    githubRecentCommits: number         // commits pushed in last ~90 days
 
     // CodeChef
     ccRating: number
@@ -51,7 +53,7 @@ export interface CodingActivity {
     lcSubmissions: number          // = lcTotalSolved
     hrBadges: number
     hrMedHardSolved: number        // = lcMediumSolved + lcHardSolved
-    githubContributions: number    // = githubRepos * 10 (proxy)
+    githubContributions: number    // = githubYearlyContributions
     githubCollaborations: number   // = githubFollowers
     githubMonthlyActive: boolean
 }

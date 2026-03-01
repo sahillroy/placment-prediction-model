@@ -208,6 +208,8 @@ export default function ProfileWizard() {
                 githubRepos: ghData.public_repos,
                 githubFollowers: ghData.followers,
                 githubStars: ghData.totalStars,
+                githubYearlyContributions: ghData.yearlyContributions,
+                githubRecentCommits: ghData.recentCommits,
                 // Codeforces
                 cfRating: cfData.rating,
                 cfMaxRating: cfData.maxRating,
@@ -218,13 +220,13 @@ export default function ProfileWizard() {
                 ccStars: ccData.skipped ? '0★' : (ccData.stars || '0★'),
                 ccSolved: ccData.skipped ? 0 : (ccData.fullySolved || 0),
                 ccGlobalRank: ccData.skipped ? 0 : (ccData.globalRank || 0),
-                // Legacy fields (backward compat)
+                // Legacy fields (backward compat with scorer)
                 lcSubmissions: lcData.totalSolved,
                 hrBadges: 0,
                 hrMedHardSolved: lcData.mediumSolved + lcData.hardSolved,
-                githubContributions: ghData.public_repos * 10,
+                githubContributions: ghData.yearlyContributions,  // real data now
                 githubCollaborations: ghData.followers,
-                githubMonthlyActive: lcData.activeDays > 30,
+                githubMonthlyActive: ghData.yearlyContributions > 50 || lcData.activeDays > 30,
             },
             experience: {
                 internshipType: 'none',

@@ -23,6 +23,8 @@ class CodingDetails(BaseModel):
     githubRepos: int = 0
     githubFollowers: int = 0
     githubStars: int = 0
+    githubYearlyContributions: int = 0   # all GitHub activity in past 365 days
+    githubRecentCommits: int = 0         # commits pushed in last ~90 days
 
     # CodeChef
     ccRating: int = 0
@@ -50,12 +52,19 @@ class CodingDetails(BaseModel):
             self.lcSubmissions = self.lcTotalSolved
         if self.hrMedHardSolved == 0:
             self.hrMedHardSolved = self.lcMediumSolved + self.lcHardSolved
-        if self.githubContributions == 0 and self.githubRepos > 0:
-            self.githubContributions = self.githubRepos * 10
+        # Use real yearly contributions; fallback to repos*10 proxy if unavailable
+        if self.githubContributions == 0:
+            if self.githubYearlyContributions > 0:
+                self.githubContributions = self.githubYearlyContributions
+            elif self.githubRepos > 0:
+                self.githubContributions = self.githubRepos * 10
         if self.githubCollaborations == 0:
             self.githubCollaborations = self.githubFollowers
         if not self.githubMonthlyActive:
-            self.githubMonthlyActive = self.lcActiveDays > 30
+            self.githubMonthlyActive = (
+                self.githubYearlyContributions > 50
+                or self.lcActiveDays > 30
+            )
 
 class ExperienceDetails(BaseModel):
     internshipType: str = "none"

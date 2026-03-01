@@ -110,8 +110,10 @@ LeetCode:
 
 GitHub:
   - Public Repos: {code.githubRepos}
-  - Followers: {code.githubFollowers}
-  - Total Stars: {code.githubStars}
+  - Followers: {code.githubFollowers} | Stars Earned: {code.githubStars}
+  - Yearly Contributions: {code.githubContributions} (commits+PRs+reviews in past 365 days)
+  - Recent Commits (last 90 days): {getattr(code, 'githubRecentCommits', 'N/A')}
+  - Activity Level: {"High (>300/yr)" if code.githubContributions > 300 else "Medium (100-300/yr)" if code.githubContributions > 100 else "Low (<100/yr)" if code.githubContributions > 0 else "Not fetched"}
 
 Codeforces:
   - Rating: {code.cfRating} | Max: {code.cfMaxRating} | Rank: {code.cfRank} [{cf_tier}]

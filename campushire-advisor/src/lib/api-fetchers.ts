@@ -114,6 +114,8 @@ export interface GithubStats {
     followers: number
     following: number
     totalStars: number
+    yearlyContributions: number  // total contributions in last 365 days (green squares)
+    recentCommits: number        // commits pushed in last ~90 days (from events API)
     username: string
     name: string | null
 }
@@ -122,14 +124,17 @@ export async function fetchGithubStats(username: string): Promise<GithubStats | 
     if (!username?.trim()) return null
     const u = username.trim()
     try {
-        const [userRes, reposRes] = await Promise.all([
+        const [userRes, reposRes, eventsRes, contribRes] = await Promise.all([
             safeFetch(`https://api.github.com/users/${u}`, 10000),
             safeFetch(`https://api.github.com/users/${u}/repos?per_page=100&sort=updated`, 10000),
+            safeFetch(`https://api.github.com/users/${u}/events?per_page=100`, 10000),
+            safeFetch(`https://github-contributions-api.jogruber.de/v4/${u}?y=last`, 12000),
         ])
 
         const userData = await safeJson(userRes)
         if (!userData || userData.message === 'Not Found') return null
 
+        // Stars across all repos
         let totalStars = 0
         const reposData = await safeJson(reposRes)
         if (Array.isArray(reposData)) {
@@ -139,11 +144,32 @@ export async function fetchGithubStats(username: string): Promise<GithubStats | 
             )
         }
 
+        // Recent commits from PushEvents (last ~90 days window from events API)
+        let recentCommits = 0
+        const eventsData = await safeJson(eventsRes)
+        if (Array.isArray(eventsData)) {
+            recentCommits = eventsData
+                .filter((e: any) => e.type === 'PushEvent')
+                .reduce((sum: number, e: any) => sum + (e.payload?.commits?.length || 0), 0)
+        }
+
+        // Yearly contributions — all activity on GitHub in last 365 days
+        let yearlyContributions = 0
+        const contribData = await safeJson(contribRes)
+        if (contribData?.contributions) {
+            yearlyContributions = contribData.contributions.reduce(
+                (s: number, d: { count: number }) => s + (d.count || 0),
+                0,
+            )
+        }
+
         return {
             public_repos: userData.public_repos || 0,
             followers: userData.followers || 0,
             following: userData.following || 0,
             totalStars,
+            yearlyContributions,
+            recentCommits,
             username: userData.login,
             name: userData.name || null,
         }
