@@ -2,11 +2,19 @@
 // API FETCHERS — All platform stat fetchers with proper endpoints & fallbacks
 // ===========================================================================
 // Last verified:  2026-03-01
-// LeetCode:       leetcode-api-faisalshohag.vercel.app  (primary — reliable)
-//                 alfa-leetcode-api.onrender.com        (fallback — rate-limited sometimes)
-// GitHub:         api.github.com                        (official — always works)
-// Codeforces:     codeforces.com/api/                   (official — always works)
-// CodeChef:       graceful skip (all free APIs terminated)
+//
+// LeetCode active days strategy:
+//   1. Solved counts    → faisalshohag.vercel.app  (fast, reliable)
+//   2. Active days      → LeetCode official GraphQL (always works, no auth needed)
+//      submissionCalendar is a JSON {epoch_seconds: count} → count unique days
+//
+// GitHub:
+//   - Yearly contributions → jogruber API (scrapes contribution graph)
+//   - Public events: GitHub truncates payload so commit count isn't reliable;
+//     we use yearlyContributions as the activity metric instead
+//
+// Codeforces: official API (always reliable)
+// CodeChef:   graceful skip (all free APIs terminated as of 2025)
 // ===========================================================================
 
 // ─── LeetCode ────────────────────────────────────────────────────────────────
@@ -15,7 +23,7 @@ export interface LeetCodeStats {
     easySolved: number
     mediumSolved: number
     hardSolved: number
-    activeDays: number
+    activeDays: number      // unique days with at least 1 submission in past year
     ranking: number
     username: string
 }
@@ -24,7 +32,7 @@ async function safeFetch(url: string, timeout = 15000): Promise<Response | null>
     try {
         const res = await fetch(url, {
             signal: AbortSignal.timeout(timeout),
-            headers: { 'Accept': 'application/json' },
+            headers: { Accept: 'application/json' },
         })
         return res
     } catch {
@@ -37,30 +45,111 @@ async function safeJson(res: Response | null): Promise<any | null> {
     try { return await res.json() } catch { return null }
 }
 
+/** Count active days from LeetCode submissionCalendar (official GraphQL).
+ *  submissionCalendar is a JSON string: { "1700000000": 3, "1700086400": 1, ... }
+ *  Keys are UNIX epoch seconds. We count unique calendar days in the past 365 days.
+ */
+function countActiveDaysFromCalendar(submissionCalendar: string | Record<string, number>): number {
+    try {
+        const cal: Record<string, number> =
+            typeof submissionCalendar === 'string'
+                ? JSON.parse(submissionCalendar)
+                : submissionCalendar
+        const cutoff = Date.now() / 1000 - 365 * 24 * 3600
+        const days = new Set<string>()
+        for (const ts of Object.keys(cal)) {
+            if (Number(ts) >= cutoff) {
+                // Convert epoch to YYYY-MM-DD to deduplicate properly
+                const d = new Date(Number(ts) * 1000)
+                days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`)
+            }
+        }
+        return days.size
+    } catch {
+        return 0
+    }
+}
+
+/** Fetch LeetCode active days via the official LeetCode GraphQL endpoint.
+ *  No authentication required for public profiles.
+ *  Returns the submissionCalendar JSON from which we count active days.
+ */
+async function fetchLeetCodeActiveDays(username: string): Promise<number> {
+    const currentYear = new Date().getFullYear()
+    const prevYear = currentYear - 1
+
+    // Fetch both current and previous year in parallel so we get a full 365-day window
+    const gql = (year: number) =>
+        fetch('https://leetcode.com/graphql', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                Referer: 'https://leetcode.com',
+                'User-Agent': 'Mozilla/5.0',
+            },
+            body: JSON.stringify({
+                operationName: 'userProfileCalendar',
+                query: `query userProfileCalendar($username: String!, $year: Int) {
+                    matchedUser(username: $username) {
+                        userCalendar(year: $year) {
+                            totalActiveDays
+                            submissionCalendar
+                        }
+                    }
+                }`,
+                variables: { username, year },
+            }),
+            signal: AbortSignal.timeout(18000),
+        }).catch(() => null)
+
+    const [curRes, prevRes] = await Promise.all([gql(currentYear), gql(prevYear)])
+
+    let activeDays = 0
+
+    // Helper to extract data from a GraphQL response
+    const extract = async (res: Response | null) => {
+        if (!res || !res.ok) return null
+        try {
+            const json = await res.json()
+            return json?.data?.matchedUser?.userCalendar ?? null
+        } catch { return null }
+    }
+
+    const [curCal, prevCal] = await Promise.all([extract(curRes), extract(prevRes)])
+
+    // Prefer totalActiveDays from current year if the API provides it
+    if (curCal?.totalActiveDays && curCal.totalActiveDays > 0) {
+        activeDays = curCal.totalActiveDays
+    } else {
+        // Count from submissionCalendar across both years (last 365 days)
+        const allEntries: Record<string, number> = {}
+        for (const cal of [curCal, prevCal]) {
+            if (cal?.submissionCalendar) {
+                const parsed =
+                    typeof cal.submissionCalendar === 'string'
+                        ? JSON.parse(cal.submissionCalendar)
+                        : cal.submissionCalendar
+                Object.assign(allEntries, parsed)
+            }
+        }
+        activeDays = countActiveDaysFromCalendar(allEntries)
+    }
+
+    return activeDays
+}
+
 export async function fetchLeetCodeStats(username: string): Promise<LeetCodeStats | null> {
     if (!username?.trim()) return null
     const u = username.trim()
 
-    // ── Primary: faisalshohag vercel API (works reliably, single endpoint) ──
-    // Returns: { totalSolved, easySolved, mediumSolved, hardSolved, ranking, acceptanceRate, ... }
-    const primaryRes = await safeFetch(`https://leetcode-api-faisalshohag.vercel.app/${u}`, 18000)
+    // ── Fetch solved counts (faisalshohag) + active days (LC GraphQL) in parallel ──
+    const [primaryRes, activeDays] = await Promise.all([
+        safeFetch(`https://leetcode-api-faisalshohag.vercel.app/${u}`, 18000),
+        fetchLeetCodeActiveDays(u),
+    ])
     const primaryData = await safeJson(primaryRes)
 
     if (primaryData && !primaryData.errors && typeof primaryData.totalSolved === 'number') {
-        // This API returns solved counts directly — fetch active days separately from alfa
-        let activeDays = 0
-        const calRes = await safeFetch(`https://alfa-leetcode-api.onrender.com/${u}/calendar`, 18000)
-        const calData = await safeJson(calRes)
-        if (calData && !calData.errors) {
-            activeDays = calData.totalActiveDays || 0
-            if (!activeDays && calData.submissionCalendar) {
-                const cal = typeof calData.submissionCalendar === 'string'
-                    ? JSON.parse(calData.submissionCalendar)
-                    : calData.submissionCalendar
-                activeDays = Object.keys(cal).length
-            }
-        }
-
         return {
             totalSolved: primaryData.totalSolved || 0,
             easySolved: primaryData.easySolved || 0,
@@ -72,37 +161,24 @@ export async function fetchLeetCodeStats(username: string): Promise<LeetCodeStat
         }
     }
 
-    // ── Fallback: alfa-leetcode-api (slower, sometimes rate-limited) ──
+    // ── Fallback: alfa-leetcode-api ──
     const BASE = 'https://alfa-leetcode-api.onrender.com'
-    const [profileRes, solvedRes, calendarRes] = await Promise.all([
+    const [profileRes, solvedRes] = await Promise.all([
         safeFetch(`${BASE}/${u}`, 20000),
         safeFetch(`${BASE}/${u}/solved`, 20000),
-        safeFetch(`${BASE}/${u}/calendar`, 20000),
     ])
 
     const profileData = await safeJson(profileRes)
-    if (!profileData || profileData.errors) return null  // username doesn't exist
+    if (!profileData || profileData.errors) return null  // username not found
 
     const solvedData = await safeJson(solvedRes)
-    const calData = await safeJson(calendarRes)
-
-    let activeDays = 0
-    if (calData && !calData.errors) {
-        activeDays = calData.totalActiveDays || 0
-        if (!activeDays && calData.submissionCalendar) {
-            const cal = typeof calData.submissionCalendar === 'string'
-                ? JSON.parse(calData.submissionCalendar)
-                : calData.submissionCalendar
-            activeDays = Object.keys(cal).length
-        }
-    }
 
     return {
         totalSolved: solvedData?.solvedProblem || 0,
         easySolved: solvedData?.easySolved || 0,
         mediumSolved: solvedData?.mediumSolved || 0,
         hardSolved: solvedData?.hardSolved || 0,
-        activeDays,
+        activeDays,          // already fetched from GraphQL
         ranking: profileData.ranking || 0,
         username: u,
     }
@@ -114,8 +190,8 @@ export interface GithubStats {
     followers: number
     following: number
     totalStars: number
-    yearlyContributions: number  // total contributions in last 365 days (green squares)
-    recentCommits: number        // commits pushed in last ~90 days (from events API)
+    yearlyContributions: number  // total activity in past 365 days (green squares on profile)
+    recentCommits: number        // approximation from events (best-effort)
     username: string
     name: string | null
 }
@@ -124,11 +200,10 @@ export async function fetchGithubStats(username: string): Promise<GithubStats | 
     if (!username?.trim()) return null
     const u = username.trim()
     try {
-        const [userRes, reposRes, eventsRes, contribRes] = await Promise.all([
+        const [userRes, reposRes, contribRes] = await Promise.all([
             safeFetch(`https://api.github.com/users/${u}`, 10000),
             safeFetch(`https://api.github.com/users/${u}/repos?per_page=100&sort=updated`, 10000),
-            safeFetch(`https://api.github.com/users/${u}/events?per_page=100`, 10000),
-            safeFetch(`https://github-contributions-api.jogruber.de/v4/${u}?y=last`, 12000),
+            safeFetch(`https://github-contributions-api.jogruber.de/v4/${u}?y=last`, 14000),
         ])
 
         const userData = await safeJson(userRes)
@@ -144,16 +219,7 @@ export async function fetchGithubStats(username: string): Promise<GithubStats | 
             )
         }
 
-        // Recent commits from PushEvents (last ~90 days window from events API)
-        let recentCommits = 0
-        const eventsData = await safeJson(eventsRes)
-        if (Array.isArray(eventsData)) {
-            recentCommits = eventsData
-                .filter((e: any) => e.type === 'PushEvent')
-                .reduce((sum: number, e: any) => sum + (e.payload?.commits?.length || 0), 0)
-        }
-
-        // Yearly contributions — all activity on GitHub in last 365 days
+        // Yearly contributions from jogruber (sums all contribution days in past year)
         let yearlyContributions = 0
         const contribData = await safeJson(contribRes)
         if (contribData?.contributions) {
@@ -161,6 +227,17 @@ export async function fetchGithubStats(username: string): Promise<GithubStats | 
                 (s: number, d: { count: number }) => s + (d.count || 0),
                 0,
             )
+        }
+
+        // GitHub Events API truncates commit data — use yearlyContributions as proxy
+        // recentCommits = contributions in last 30 days (from jogruber daily array)
+        let recentCommits = 0
+        if (Array.isArray(contribData?.contributions)) {
+            const cutoff = new Date()
+            cutoff.setDate(cutoff.getDate() - 30)
+            recentCommits = contribData.contributions
+                .filter((d: { date: string }) => new Date(d.date) >= cutoff)
+                .reduce((s: number, d: { count: number }) => s + (d.count || 0), 0)
         }
 
         return {
