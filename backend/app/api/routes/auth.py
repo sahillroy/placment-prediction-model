@@ -4,8 +4,14 @@ from app.db.models import User
 from app.schemas.user import UserCreate, UserLogin, UserResponse
 from app.core.security import get_password_hash, verify_password, create_access_token
 from app.api.deps import get_db, get_current_user
+from app.core.config import settings
 
 router = APIRouter()
+
+# Cookie settings differ between local dev (HTTP) and production (HTTPS cross-origin)
+is_production = settings.ENVIRONMENT == "production"
+COOKIE_SECURE   = is_production        # secure=True requires HTTPS
+COOKIE_SAMESITE = "none" if is_production else "lax"  # none = cross-site, lax = same-site
 
 @router.post("/register")
 def register(user_in: UserCreate, response: Response, db: Session = Depends(get_db)):
@@ -30,8 +36,8 @@ def register(user_in: UserCreate, response: Response, db: Session = Depends(get_
         key="access_token",
         value=access_token,
         httponly=True,
-        secure=True,        # Required when samesite=none
-        samesite="none",    # Required for cross-origin (Vercel → Render)
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
         max_age=7 * 24 * 60 * 60
     )
     return {"user": UserResponse.model_validate(user)}
@@ -48,8 +54,8 @@ def login(login_data: UserLogin, response: Response, db: Session = Depends(get_d
         key="access_token",
         value=access_token,
         httponly=True,
-        secure=True,        # Required when samesite=none
-        samesite="none",    # Required for cross-origin (Vercel → Render)
+        secure=COOKIE_SECURE,
+        samesite=COOKIE_SAMESITE,
         max_age=7 * 24 * 60 * 60
     )
     return {"user": UserResponse.model_validate(user)}

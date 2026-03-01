@@ -1,13 +1,15 @@
 // ===========================================================================
 // API FETCHERS — All platform stat fetchers with proper endpoints & fallbacks
 // ===========================================================================
+// Last verified:  2026-03-01
+// LeetCode:       leetcode-api-faisalshohag.vercel.app  (primary — reliable)
+//                 alfa-leetcode-api.onrender.com        (fallback — rate-limited sometimes)
+// GitHub:         api.github.com                        (official — always works)
+// Codeforces:     codeforces.com/api/                   (official — always works)
+// CodeChef:       graceful skip (all free APIs terminated)
+// ===========================================================================
 
 // ─── LeetCode ────────────────────────────────────────────────────────────────
-// Uses alfa-leetcode-api.onrender.com:
-//   /{username}         → profile (ranking, reputation, etc.)
-//   /{username}/solved  → easySolved, mediumSolved, hardSolved, solvedProblem
-//   /{username}/calendar → totalActiveDays, submissionCalendar
-
 export interface LeetCodeStats {
     totalSolved: number
     easySolved: number
@@ -18,56 +20,91 @@ export interface LeetCodeStats {
     username: string
 }
 
-export async function fetchLeetCodeStats(username: string): Promise<LeetCodeStats | null> {
-    if (!username?.trim()) return null
-    const BASE = 'https://alfa-leetcode-api.onrender.com'
-
+async function safeFetch(url: string, timeout = 15000): Promise<Response | null> {
     try {
-        // Fetch profile + solved + calendar in parallel
-        const [profileRes, solvedRes, calendarRes] = await Promise.all([
-            fetch(`${BASE}/${username}`, { signal: AbortSignal.timeout(15000) }).catch(() => null),
-            fetch(`${BASE}/${username}/solved`, { signal: AbortSignal.timeout(15000) }).catch(() => null),
-            fetch(`${BASE}/${username}/calendar`, { signal: AbortSignal.timeout(15000) }).catch(() => null),
-        ])
-
-        // Check if user exists by looking at profile
-        if (!profileRes?.ok) return null
-        const profileData = await profileRes.json().catch(() => null)
-        if (!profileData || profileData.errors) return null  // invalid username
-
-        let easySolved = 0, mediumSolved = 0, hardSolved = 0, totalSolved = 0
-        let activeDays = 0
-        const ranking: number = profileData.ranking || 0
-
-        // Parse solved counts from /solved endpoint
-        if (solvedRes?.ok) {
-            const solvedData = await solvedRes.json().catch(() => null)
-            if (solvedData && !solvedData.errors) {
-                totalSolved = solvedData.solvedProblem || 0
-                easySolved = solvedData.easySolved || 0
-                mediumSolved = solvedData.mediumSolved || 0
-                hardSolved = solvedData.hardSolved || 0
-            }
-        }
-
-        // Parse active days from /calendar endpoint
-        if (calendarRes?.ok) {
-            const calData = await calendarRes.json().catch(() => null)
-            if (calData && !calData.errors) {
-                activeDays = calData.totalActiveDays || 0
-                // Fallback: count keys in submissionCalendar object
-                if (!activeDays && calData.submissionCalendar) {
-                    const cal = typeof calData.submissionCalendar === 'string'
-                        ? JSON.parse(calData.submissionCalendar)
-                        : calData.submissionCalendar
-                    activeDays = Object.keys(cal).length
-                }
-            }
-        }
-
-        return { totalSolved, easySolved, mediumSolved, hardSolved, activeDays, ranking, username }
+        const res = await fetch(url, {
+            signal: AbortSignal.timeout(timeout),
+            headers: { 'Accept': 'application/json' },
+        })
+        return res
     } catch {
         return null
+    }
+}
+
+async function safeJson(res: Response | null): Promise<any | null> {
+    if (!res || !res.ok) return null
+    try { return await res.json() } catch { return null }
+}
+
+export async function fetchLeetCodeStats(username: string): Promise<LeetCodeStats | null> {
+    if (!username?.trim()) return null
+    const u = username.trim()
+
+    // ── Primary: faisalshohag vercel API (works reliably, single endpoint) ──
+    // Returns: { totalSolved, easySolved, mediumSolved, hardSolved, ranking, acceptanceRate, ... }
+    const primaryRes = await safeFetch(`https://leetcode-api-faisalshohag.vercel.app/${u}`, 18000)
+    const primaryData = await safeJson(primaryRes)
+
+    if (primaryData && !primaryData.errors && typeof primaryData.totalSolved === 'number') {
+        // This API returns solved counts directly — fetch active days separately from alfa
+        let activeDays = 0
+        const calRes = await safeFetch(`https://alfa-leetcode-api.onrender.com/${u}/calendar`, 18000)
+        const calData = await safeJson(calRes)
+        if (calData && !calData.errors) {
+            activeDays = calData.totalActiveDays || 0
+            if (!activeDays && calData.submissionCalendar) {
+                const cal = typeof calData.submissionCalendar === 'string'
+                    ? JSON.parse(calData.submissionCalendar)
+                    : calData.submissionCalendar
+                activeDays = Object.keys(cal).length
+            }
+        }
+
+        return {
+            totalSolved: primaryData.totalSolved || 0,
+            easySolved: primaryData.easySolved || 0,
+            mediumSolved: primaryData.mediumSolved || 0,
+            hardSolved: primaryData.hardSolved || 0,
+            activeDays,
+            ranking: primaryData.ranking || 0,
+            username: u,
+        }
+    }
+
+    // ── Fallback: alfa-leetcode-api (slower, sometimes rate-limited) ──
+    const BASE = 'https://alfa-leetcode-api.onrender.com'
+    const [profileRes, solvedRes, calendarRes] = await Promise.all([
+        safeFetch(`${BASE}/${u}`, 20000),
+        safeFetch(`${BASE}/${u}/solved`, 20000),
+        safeFetch(`${BASE}/${u}/calendar`, 20000),
+    ])
+
+    const profileData = await safeJson(profileRes)
+    if (!profileData || profileData.errors) return null  // username doesn't exist
+
+    const solvedData = await safeJson(solvedRes)
+    const calData = await safeJson(calendarRes)
+
+    let activeDays = 0
+    if (calData && !calData.errors) {
+        activeDays = calData.totalActiveDays || 0
+        if (!activeDays && calData.submissionCalendar) {
+            const cal = typeof calData.submissionCalendar === 'string'
+                ? JSON.parse(calData.submissionCalendar)
+                : calData.submissionCalendar
+            activeDays = Object.keys(cal).length
+        }
+    }
+
+    return {
+        totalSolved: solvedData?.solvedProblem || 0,
+        easySolved: solvedData?.easySolved || 0,
+        mediumSolved: solvedData?.mediumSolved || 0,
+        hardSolved: solvedData?.hardSolved || 0,
+        activeDays,
+        ranking: profileData.ranking || 0,
+        username: u,
     }
 }
 
@@ -83,21 +120,23 @@ export interface GithubStats {
 
 export async function fetchGithubStats(username: string): Promise<GithubStats | null> {
     if (!username?.trim()) return null
+    const u = username.trim()
     try {
         const [userRes, reposRes] = await Promise.all([
-            fetch(`https://api.github.com/users/${username}`, { signal: AbortSignal.timeout(10000) }),
-            fetch(`https://api.github.com/users/${username}/repos?per_page=100&sort=updated`, { signal: AbortSignal.timeout(10000) }),
+            safeFetch(`https://api.github.com/users/${u}`, 10000),
+            safeFetch(`https://api.github.com/users/${u}/repos?per_page=100&sort=updated`, 10000),
         ])
 
-        if (!userRes.ok) return null
-        const userData = await userRes.json()
+        const userData = await safeJson(userRes)
+        if (!userData || userData.message === 'Not Found') return null
 
         let totalStars = 0
-        if (reposRes.ok) {
-            const repos = await reposRes.json()
-            if (Array.isArray(repos)) {
-                totalStars = repos.reduce((s: number, r: { stargazers_count?: number }) => s + (r.stargazers_count || 0), 0)
-            }
+        const reposData = await safeJson(reposRes)
+        if (Array.isArray(reposData)) {
+            totalStars = reposData.reduce(
+                (s: number, r: { stargazers_count?: number }) => s + (r.stargazers_count || 0),
+                0,
+            )
         }
 
         return {
@@ -113,7 +152,7 @@ export async function fetchGithubStats(username: string): Promise<GithubStats | 
     }
 }
 
-// ─── Codeforces (Official API — always works) ─────────────────────────────────
+// ─── Codeforces — Official API (always reliable) ──────────────────────────────
 export interface CodeforcesStats {
     handle: string
     rating: number
@@ -126,32 +165,31 @@ export interface CodeforcesStats {
 
 export async function fetchCodeforcesStats(handle: string): Promise<CodeforcesStats | null> {
     if (!handle?.trim()) return null
+    const h = handle.trim()
     try {
-        // Fetch user info + submission history in parallel
         const [userRes, statusRes] = await Promise.all([
-            fetch(`https://codeforces.com/api/user.info?handles=${handle}`, { signal: AbortSignal.timeout(12000) }),
-            fetch(`https://codeforces.com/api/user.status?handle=${handle}&from=1&count=10000`, { signal: AbortSignal.timeout(15000) }).catch(() => null),
+            safeFetch(`https://codeforces.com/api/user.info?handles=${h}`, 12000),
+            safeFetch(
+                `https://codeforces.com/api/user.status?handle=${h}&from=1&count=10000`,
+                18000,
+            ).catch(() => null),
         ])
 
-        if (!userRes.ok) return null
-        const userData = await userRes.json()
-        if (userData.status !== 'OK' || !userData.result?.[0]) return null
-
+        const userData = await safeJson(userRes)
+        if (!userData || userData.status !== 'OK' || !userData.result?.[0]) return null
         const user = userData.result[0]
 
         // Count unique accepted problems
         let solvedCount = 0
-        if (statusRes?.ok) {
-            const statusData = await statusRes.json().catch(() => null)
-            if (statusData?.status === 'OK') {
-                const solved = new Set<string>()
-                for (const sub of statusData.result) {
-                    if (sub.verdict === 'OK' && sub.problem) {
-                        solved.add(`${sub.problem.contestId}-${sub.problem.index}`)
-                    }
+        const statusData = await safeJson(statusRes)
+        if (statusData?.status === 'OK') {
+            const solved = new Set<string>()
+            for (const sub of statusData.result) {
+                if (sub.verdict === 'OK' && sub.problem) {
+                    solved.add(`${sub.problem.contestId}-${sub.problem.index}`)
                 }
-                solvedCount = solved.size
             }
+            solvedCount = solved.size
         }
 
         return {
@@ -168,9 +206,7 @@ export async function fetchCodeforcesStats(handle: string): Promise<CodeforcesSt
     }
 }
 
-// ─── CodeChef (best-effort — free APIs often go down) ────────────────────────
-// NOTE: Most free CodeChef APIs have been taken down or paywalled.
-// We try multiple known endpoints; if all fail it gracefully degrades.
+// ─── CodeChef — best-effort (all free public APIs terminated as of 2025) ──────
 export interface CodeChefStats {
     username: string
     currentRating: number
@@ -182,7 +218,15 @@ export interface CodeChefStats {
 }
 
 export async function fetchCodeChefStats(username: string): Promise<CodeChefStats> {
-    const fallback: CodeChefStats = { username, currentRating: 0, stars: '0★', fullySolved: 0, globalRank: 0, skipped: true, reason: 'API unavailable' }
+    const fallback: CodeChefStats = {
+        username,
+        currentRating: 0,
+        stars: '0★',
+        fullySolved: 0,
+        globalRank: 0,
+        skipped: true,
+        reason: 'API unavailable',
+    }
     if (!username?.trim()) return { ...fallback, reason: 'No username provided' }
 
     const apis = [
@@ -191,24 +235,15 @@ export async function fetchCodeChefStats(username: string): Promise<CodeChefStat
     ]
 
     for (const url of apis) {
-        try {
-            const res = await fetch(url, {
-                signal: AbortSignal.timeout(6000),
-                headers: { 'User-Agent': 'Mozilla/5.0' },
-            })
-            if (!res.ok) continue
-            const data = await res.json()
-            if (data.success === false || data.status === 'error' || data.message) continue
-
-            return {
-                username,
-                currentRating: data.currentRating || data.rating || 0,
-                stars: data.stars || '0★',
-                fullySolved: data.fully_solved || data.problemsSolved || 0,
-                globalRank: data.globalRank || data.global_rank || 0,
-            }
-        } catch {
-            continue
+        const res = await safeFetch(url, 6000)
+        const data = await safeJson(res)
+        if (!data || data.success === false || data.message || data.status === 'error') continue
+        return {
+            username,
+            currentRating: data.currentRating || data.rating || 0,
+            stars: data.stars || '0★',
+            fullySolved: data.fully_solved || data.problemsSolved || 0,
+            globalRank: data.globalRank || data.global_rank || 0,
         }
     }
 

@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     # CORS settings for production
     FRONTEND_URL: str = "http://localhost:5173"
 
+    # Set to "production" on Render, leave blank for local
+    ENVIRONMENT: str = "development"
+
     # Google Gemini AI (for AI-powered analysis)
     GEMINI_API_KEY: str = ""
 
