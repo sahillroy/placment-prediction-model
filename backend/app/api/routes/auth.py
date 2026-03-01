@@ -10,12 +10,12 @@ router = APIRouter()
 
 # Cookie settings differ between local dev (HTTP) and production (HTTPS cross-origin)
 is_production = settings.ENVIRONMENT == "production"
-COOKIE_SECURE   = is_production        # secure=True requires HTTPS
-COOKIE_SAMESITE = "none" if is_production else "lax"  # none = cross-site, lax = same-site
+COOKIE_SECURE   = is_production
+COOKIE_SAMESITE = "none" if is_production else "lax"
 
 @router.post("/register")
 def register(user_in: UserCreate, response: Response, db: Session = Depends(get_db)):
-    """Register a new user and set httponly secure cookie."""
+    """Register a new user. Returns JWT in both cookie AND response body."""
     user = db.query(User).filter(User.email == user_in.email).first()
     if user:
         raise HTTPException(
@@ -40,15 +40,17 @@ def register(user_in: UserCreate, response: Response, db: Session = Depends(get_
         samesite=COOKIE_SAMESITE,
         max_age=7 * 24 * 60 * 60
     )
-    return {"user": UserResponse.model_validate(user)}
+    # IMPORTANT: Also return token in body for cross-domain deployments
+    # where browsers block third-party cookies (Vercel -> Render)
+    return {"user": UserResponse.model_validate(user), "access_token": access_token}
 
 @router.post("/login")
 def login(login_data: UserLogin, response: Response, db: Session = Depends(get_db)):
-    """Authenticate and issue httponly cookie."""
+    """Authenticate and issue JWT in both cookie AND response body."""
     user = db.query(User).filter(User.email == login_data.email).first()
     if not user or not verify_password(login_data.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid phone or password")
-        
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password")
+
     access_token = create_access_token(subject=user.id)
     response.set_cookie(
         key="access_token",
@@ -58,7 +60,8 @@ def login(login_data: UserLogin, response: Response, db: Session = Depends(get_d
         samesite=COOKIE_SAMESITE,
         max_age=7 * 24 * 60 * 60
     )
-    return {"user": UserResponse.model_validate(user)}
+    # IMPORTANT: Also return token in body for cross-domain deployments
+    return {"user": UserResponse.model_validate(user), "access_token": access_token}
 
 @router.post("/logout")
 def logout(response: Response):
@@ -68,5 +71,5 @@ def logout(response: Response):
 
 @router.get("/me", response_model=UserResponse)
 def read_user_me(current_user: UserResponse = Depends(get_current_user)):
-    """Get current user data via cookie."""
+    """Get current user data via cookie or Authorization header."""
     return current_user
