@@ -13,7 +13,7 @@ export function useSubmitAnalysis() {
             formData.append('profile', JSON.stringify(rest))
             if (resumeFile) formData.append('resume', resumeFile)
 
-            const res = await api.post<AnalysisResult>('/analyse', formData, {
+            const res = await api.post<AnalysisResult>('/analyse/', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' },
             })
             return res.data
